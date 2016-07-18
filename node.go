@@ -18,6 +18,12 @@ type GossipNode struct {
 	Port string
 }
 
+// Sends a message to a node, can be used to send a request or forward
+// gossip
+func (n *GossipNode) SendMessage(b []byte) error {
+	return nil
+}
+
 // This will populate the bootstrap (start up) nodes, a node will need to be
 // told about at least one connection to start gossiping
 func bootstrapGossipNodes() ([]GossipNode, error) {

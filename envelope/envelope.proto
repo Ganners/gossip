@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+// An envelope is our internal type which will wrap the protobuf object.
+// It contains common fields which will be used by the framework.
+message Envelope {
+
+  // Gives us some understand as to whether this is a request or a
+  // response
+  enum Type {
+    REQUEST = 0;
+    RESPONSE = 1;
+  }
+
+  // Contains some header meta-data about the request/response
+  message Header {
+    // The key will be what services can filter on
+    string key = 1;
+
+    // The receipt is how a request can have a response returned
+    string receipt = 2;
+  }
+
+  Type type = 1;
+  Header headers = 2;
+
+  // The encodedMessage contains the embedded proto bytes
+  bytes encodedMessage = 3;
+}

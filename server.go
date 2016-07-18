@@ -1,20 +1,40 @@
 package gossip
 
 import (
+	"bufio"
+	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
+
+	"github.com/ganners/gossip/envelope"
+	"github.com/gogo/protobuf/proto"
 )
 
 // Server is the root structure for a gossip node
 type Server struct {
 	Name        string
 	Description string
-	Nodes       []GossipNode
-	Logger      Logger
+
+	Host string
+	Port string
+
+	Nodes  []GossipNode
+	Logger Logger
+
+	WorkersPerListener int
+	WorkersPerHandler  int
 
 	signals   chan os.Signal
 	terminate chan struct{}
+
+	handlers   []RequestHandler
+	schedulers map[time.Duration]HandlerFunc
+
+	// The protobuf enveloped message
+	incomingMessage chan envelope.Envelope
 }
 
 // NewServer creates a new idle server ready to be started
@@ -69,7 +89,106 @@ func (s *Server) setupSignals() {
 // channel will receive upon termination of the server which can come
 // from a number of different sources.
 func (s *Server) Start() <-chan struct{} {
+
+	// Commence all handlers
+	s.startRequestHandlers()
+
+	// Commence all schedulers
+	// @TODO(mark)
+
+	s.startNetworkListener()
+
 	return s.listenForTermination()
+}
+
+// Commences the network listening, will read in the TCP connections and
+// convert to the envelope
+func (s *Server) startNetworkListener() {
+	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%s", s.Host, s.Port))
+	if err != nil {
+		s.Logger.Errorf("[Network Listener] Unable to start network listener: %s", err.Error())
+
+		// Retrying
+		time.Sleep(time.Second * 5)
+		s.startNetworkListener()
+	}
+
+	// Loop and accept connections which immediately forward to a connection
+	// handler
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			s.Logger.Errorf("[Network Listener] Unable to accept connection: %s", err.Error())
+			continue
+		}
+
+		go s.startConnectionHandler(conn)
+	}
+}
+
+// Starts a connection handler for a given connection
+func (s *Server) startConnectionHandler(conn net.Conn) {
+	// Read the connection bytes
+	reader := bufio.NewReader(conn)
+	b, err := reader.ReadBytes('\n')
+	if err != nil {
+		s.Logger.Errorf("[Connection Handler] Unable to read bytes: %s", err.Error())
+		return
+	}
+
+	// Forward gossip to other nodes we're connected to
+	for _, node := range s.Nodes {
+		err := node.SendMessage(b)
+		if err != nil {
+			// @TODO(mark): Mark a failure at node
+			s.Logger.Errorf("[Forward Gossip] Unable to contact node %+v: %s", node, err.Error())
+			return
+		}
+	}
+
+	// Convert and downstream
+	envelope := envelope.Envelope{}
+	err = proto.Unmarshal(b, &envelope)
+	if err != nil {
+		s.Logger.Errorf("[Unmarshal Envelope] Unable to unmarshal envelope: %s", err.Error())
+		return
+	}
+
+	// Send it downstream
+	s.incomingMessage <- envelope
+}
+
+// When a message comes in, we forward that message to all handlers as
+// many might want to deal with it
+func (s *Server) forwardHandlers(message envelope.Envelope) {
+	for _, handler := range s.handlers {
+		if message.GetHeaders().Key == handler.Key {
+			unmarshalType := handler.UnmarshalType
+			proto.Unmarshal(message.EncodedMessage, unmarshalType)
+
+			err := handler.HandlerFunc(unmarshalType)
+			if err != nil {
+				s.Logger.Errorf("[Handler] Error processing request: %s", err.Error())
+			}
+		}
+	}
+}
+
+// Starts a handler for a single request, will be triggered when a
+// server starts, and also when a new request gets added during runtime
+func (s *Server) startRequestHandlers() {
+	for i := 0; i < s.WorkersPerHandler; i++ {
+		go func() {
+			for {
+				select {
+				case <-s.terminate:
+					return
+				case message := <-s.incomingMessage:
+					s.forwardHandlers(message)
+				}
+			}
+		}()
+	}
 }
 
 // Listens for termination to return on a shutdown channel to the
