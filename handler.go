@@ -11,19 +11,35 @@ import (
 //
 // It doesn't need to send any response if it does not want, though it
 // can trigger another message to a receipt if it wants
-type RequestHandlerFunc func(request proto.Message) error
+type RequestHandlerFunc func(server *Server, request proto.Message) error
+
+// Similar with the above, except it will deal with the bytes received rather
+// than the step prior which marshals into a protobuf
+type RawRequestHandlerFunc func(server *Server, b []byte) error
 
 // A handler doesn't take a request, it will be used to do scheduled
 // things
-type HandlerFunc func() error
+type HandlerFunc func(server *Server) error
 
 // The request handler wrapper, allows us to understand the key we're
-// hunting for and also specify the type so we know how to unmarshal the
-// protobuf
+// hunting for and also specify the type so we know how to unmarshal
+// the protobuf
 type RequestHandler struct {
-	Key           string
+	RequestMatcher
 	UnmarshalType proto.Message
 	HandlerFunc   RequestHandlerFunc
+}
+
+// Similar with the RequestHandler but deals with raw bytes from a
+// request
+type RawRequestHandler struct {
+	RequestMatcher
+	HandlerFunc RawRequestHandlerFunc
+}
+
+// Embeddable type which allows a key to be matched
+type RequestMatcher struct {
+	Matcher string
 }
 
 // IsMatch will test whether the key matches another given key which is
@@ -32,28 +48,28 @@ type RequestHandler struct {
 // '*' will mean everything matches
 // 'customer*' will mean anything that starts with 'customer' matches
 // 'customer*' will mean anything that ends with 'customer' matches
-func (req *RequestHandler) IsMatch(key string) bool {
+func (req *RequestMatcher) IsMatch(key string) bool {
 	// Everything is a match
-	if req.Key == "*" {
+	if req.Matcher == "*" {
 		return true
 	}
 
 	// Suffix match
-	if req.Key[0] == '*' {
-		if strings.HasSuffix(key, req.Key[1:]) {
+	if req.Matcher[0] == '*' {
+		if strings.HasSuffix(key, req.Matcher[1:]) {
 			return true
 		}
 	}
 
 	// Prefix match
-	if req.Key[len(req.Key)-1] == '*' {
-		if strings.HasPrefix(key, req.Key[:len(req.Key)-2]) {
+	if req.Matcher[len(req.Matcher)-1] == '*' {
+		if strings.HasPrefix(key, req.Matcher[:len(req.Matcher)-2]) {
 			return true
 		}
 	}
 
 	// Exact match
-	if req.Key == key {
+	if req.Matcher == key {
 		return true
 	}
 

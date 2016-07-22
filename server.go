@@ -30,8 +30,9 @@ type Server struct {
 	signals   chan os.Signal
 	terminate chan struct{}
 
-	handlers   []RequestHandler
-	schedulers map[time.Duration]HandlerFunc
+	handlers    []RequestHandler
+	rawHandlers []RawRequestHandler
+	schedulers  map[time.Duration]HandlerFunc
 
 	// The protobuf enveloped message
 	incomingMessage chan envelope.Envelope
@@ -161,12 +162,24 @@ func (s *Server) startConnectionHandler(conn net.Conn) {
 // When a message comes in, we forward that message to all handlers as
 // many might want to deal with it
 func (s *Server) forwardHandlers(message envelope.Envelope) {
-	for _, handler := range s.handlers {
-		if message.GetHeaders().Key == handler.Key {
-			unmarshalType := handler.UnmarshalType
-			proto.Unmarshal(message.EncodedMessage, unmarshalType)
 
-			err := handler.HandlerFunc(unmarshalType)
+	// Send to the raw handlers first
+	for _, rawHandler := range s.rawHandlers {
+		err := rawHandler.HandlerFunc(s, message.EncodedMessage)
+		if err != nil {
+			s.Logger.Errorf("[Handler] Error processing raw request: %s", err.Error())
+		}
+	}
+
+	// Send to the handlers which require it to be unmarshaled
+	for _, handler := range s.handlers {
+		if handler.IsMatch(message.GetHeaders().Key) {
+			unmarshalType := handler.UnmarshalType
+			err := proto.Unmarshal(message.EncodedMessage, unmarshalType)
+			if err != nil {
+				s.Logger.Errorf("[Handler] Error unmarshaling request: %s", err.Error())
+			}
+			err = handler.HandlerFunc(s, unmarshalType)
 			if err != nil {
 				s.Logger.Errorf("[Handler] Error processing request: %s", err.Error())
 			}

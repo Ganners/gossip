@@ -35,9 +35,10 @@ func TestIsMatch(t *testing.T) {
 			ShouldMatch: false,
 		},
 	} {
-		req := &RequestHandler{
-			Key: test.Matcher,
-		}
+
+		req := &RequestHandler{}
+		req.Matcher = test.Matcher
+
 		res := req.IsMatch(test.Key)
 		if res != test.ShouldMatch {
 			t.Errorf("Expected match to be %t, got %t", test.ShouldMatch, res)
