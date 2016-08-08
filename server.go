@@ -1,7 +1,6 @@
 package gossip
 
 import (
-	"bufio"
 	"fmt"
 	"net"
 	"os"
@@ -36,7 +35,7 @@ type Server struct {
 	schedulers map[time.Duration]HandlerFunc
 
 	// The protobuf enveloped message
-	incomingMessage chan envelope.Envelope
+	incomingMessage chan *envelope.Envelope
 }
 
 // NewServer creates a new idle server ready to be started
@@ -61,8 +60,14 @@ func NewServer(
 		Logger:      logger,
 		Host:        host,
 		Port:        port,
+		handlers:    defaultHandlers,
 
-		terminate: make(chan struct{}, 1),
+		// @TODO(mark): Make flag/config based or modifable
+		WorkersPerListener: 5,
+		WorkersPerHandler:  5,
+
+		terminate:       make(chan struct{}, 1),
+		incomingMessage: make(chan *envelope.Envelope, 5),
 	}
 
 	server.setupSignals()
@@ -95,15 +100,21 @@ func (s *Server) setupSignals() {
 // channel will receive upon termination of the server which can come
 // from a number of different sources.
 func (s *Server) Start() <-chan struct{} {
+
+	s.Logger.Debugf("Commencing server")
+
+	// Start server
+	go s.startNetworkListener()
+
+	s.Logger.Debugf("Starting request handlers")
+
 	// Commence all handlers
-	s.startRequestHandlers()
+	go s.startRequestHandlers()
 
-	// Commence all schedulers
-	// @TODO(mark)
+	s.Logger.Debugf("Sending subscriptions")
 
-	s.startNetworkListener()
-
-	s.subscribeToNodes()
+	// Send out subscription request
+	go s.subscribeToNodes()
 
 	return s.listenForTermination()
 }
@@ -129,30 +140,41 @@ func (s *Server) startNetworkListener() {
 			continue
 		}
 
+		s.Logger.Debugf("Accepted new connection")
+
 		go s.startConnectionHandler(conn)
 	}
 }
 
 // Starts a connection handler for a given connection
 func (s *Server) startConnectionHandler(conn net.Conn) {
-	// Read the connection bytes
-	reader := bufio.NewReader(conn)
-	b, err := reader.ReadBytes('\n')
-	if err != nil {
-		s.Logger.Errorf("[Connection Handler] Unable to read bytes: %s", err.Error())
-		return
-	}
+	defer conn.Close()
+	request := make([]byte, 1024*2) // 2 MB request is possible!
+	for {
+		// Read the connection bytes
+		n, err := conn.Read(request)
+		b := request[:n]
+		if err != nil {
+			s.Logger.Errorf("[ReadLine] Unable to read line")
+			return
+		}
 
-	// Convert and downstream
-	envelope := envelope.Envelope{}
-	err = proto.Unmarshal(b, &envelope)
-	if err != nil {
-		s.Logger.Errorf("[Unmarshal Envelope] Unable to unmarshal envelope: %s", err.Error())
-		return
-	}
+		s.Logger.Debugf("Reading # bytes %d", len(b))
 
-	// Send it downstream
-	s.incomingMessage <- envelope
+		// Convert and downstream
+		envelope := &envelope.Envelope{}
+		err = proto.Unmarshal(b, envelope)
+		if err != nil {
+			s.Logger.Errorf("[Unmarshal Envelope] Unable to unmarshal envelope: %s", err.Error())
+			return
+		}
+
+		// Send it downstream
+		go func() {
+			s.Logger.Debugf("Sending message downstream")
+			s.incomingMessage <- envelope
+		}()
+	}
 }
 
 // When a message comes in, we forward that message to all handlers as
@@ -161,21 +183,8 @@ func (s *Server) forwardHandlers(message *envelope.Envelope) {
 	// Send to the handlers which require it to be unmarshaled
 	for _, handler := range s.handlers {
 		if handler.IsMatch(message.GetHeaders().Key) {
-			// The message to forward to the respective handler
-			var unmarshaledPb proto.Message
-
-			if unmarshaledPb == nil {
-				// Send the raw enveloped message
-				unmarshaledPb = message
-			} else {
-				// Handle unmarshal here
-				unmarshaledPb = handler.UnmarshalType
-				err := proto.Unmarshal(message.EncodedMessage, unmarshaledPb)
-				if err != nil {
-					s.Logger.Errorf("[Handler] Error unmarshaling request: %s", err.Error())
-				}
-			}
-			err := handler.HandlerFunc(s, unmarshaledPb)
+			// The message to forward to the respective handler (dereference first)
+			err := handler.HandlerFunc(s, *message)
 			if err != nil {
 				s.Logger.Errorf("[Handler] Error processing request: %s", err.Error())
 			}
@@ -193,7 +202,8 @@ func (s *Server) startRequestHandlers() {
 				case <-s.terminate:
 					return
 				case message := <-s.incomingMessage:
-					s.forwardHandlers(&message)
+					s.Logger.Debugf("Incoming message found: %s", message.Headers.Key)
+					s.forwardHandlers(message)
 				}
 			}
 		}()
@@ -236,6 +246,8 @@ func (s *Server) spreadGossipRaw(b []byte) {
 		if err != nil {
 			s.Logger.Errorf("Unable to connect to node: %s", err)
 		}
+
+		s.Logger.Debugf("Broadcasting # bytes: %d", len(b))
 
 		err = node.SendMessage(b)
 		if err != nil {
@@ -280,7 +292,6 @@ func (s *Server) Broadcast(
 	message proto.Message,
 	messageType int32,
 ) (string, error) {
-
 	// Check if the message type exists
 	_, ok := envelope.Envelope_Type_name[messageType]
 	if !ok {

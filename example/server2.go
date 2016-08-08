@@ -9,9 +9,15 @@ func main() {
 	server, err := gossip.NewServer(
 		"auth",
 		"Handles authentication",
-		"0.0.0.0", "8001",
+		"0.0.0.0", "8002",
 		logger,
 	)
+
+	// Add node manually
+	server.Nodes = append(server.Nodes, &gossip.GossipNode{
+		Host: "0.0.0.0",
+		Port: "8001",
+	})
 
 	if err != nil {
 		logger.Errorf("Could not start server: %s", err.Error())

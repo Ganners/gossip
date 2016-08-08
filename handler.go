@@ -3,7 +3,7 @@ package gossip
 import (
 	"strings"
 
-	"github.com/gogo/protobuf/proto"
+	"github.com/ganners/gossip/pb/envelope"
 )
 
 // A request handler will expect a given key enveloped with a
@@ -11,7 +11,7 @@ import (
 //
 // It doesn't need to send any response if it does not want, though it
 // can trigger another message to a receipt if it wants
-type RequestHandlerFunc func(server *Server, request proto.Message) error
+type RequestHandlerFunc func(server *Server, request envelope.Envelope) error
 
 // A handler doesn't take a request, it will be used to do scheduled
 // things
@@ -27,8 +27,7 @@ type RequestMatcher struct {
 // the protobuf
 type RequestHandler struct {
 	RequestMatcher
-	UnmarshalType proto.Message
-	HandlerFunc   RequestHandlerFunc
+	HandlerFunc RequestHandlerFunc
 }
 
 // IsMatch will test whether the key matches another given key which is
