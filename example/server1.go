@@ -13,6 +13,7 @@ func main() {
 	server, err := gossip.NewServer(
 		"auth",
 		"Handles authentication",
+		"0.0.0.0", "8001",
 		logger,
 	)
 

@@ -7,8 +7,9 @@ message Envelope {
   // Gives us some understand as to whether this is a request or a
   // response
   enum Type {
-    REQUEST = 0;
-    RESPONSE = 1;
+    ASYNC_REQUEST = 0;
+    SYNC_REQUEST = 1;
+    RESPONSE = 2;
   }
 
   // Contains some header meta-data about the request/response
@@ -20,9 +21,14 @@ message Envelope {
     string receipt = 2;
   }
 
-  Type type = 1;
-  Header headers = 2;
+  string uid = 1;
+  Type   type = 2;
+  Header headers = 3;
+
+  // So we can keep track of i, which is the number of hops since the
+  // originator (I.e. how many nodes it has passed through)
+  int32 passedThrough = 4;
 
   // The encodedMessage contains the embedded proto bytes
-  bytes encodedMessage = 3;
+  bytes encodedMessage = 5;
 }

@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+// An envelope is our internal type which will wrap the protobuf object.
+// It contains common fields which will be used by the framework.
+message Envelope {
+
+  // Gives us some understand as to whether this is a request or a
+  // response
+  enum Type {
+    ASYNC_REQUEST = 0;
+    SYNC_REQUEST = 1;
+    RESPONSE = 2;
+  }
+
+  // Contains some header meta-data about the request/response
+  message Header {
+    // The key will be what services can filter on
+    string key = 1;
+
+    // The receipt is how a request can have a response returned
+    string receipt = 2;
+  }
+
+  string uid = 1;
+  Type   type = 2;
+  Header headers = 3;
+
+  // So we can keep track of i, which is the number of hops since the
+  // originator (I.e. how many nodes it has passed through)
+  int32 passedThrough = 4;
+
+  // The encodedMessage contains the embedded proto bytes
+  bytes encodedMessage = 5;
+}

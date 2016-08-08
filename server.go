@@ -9,7 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ganners/gossip/envelope"
+	"github.com/ganners/gossip/pb/envelope"
+	"github.com/ganners/gossip/pb/subscribe"
 	"github.com/gogo/protobuf/proto"
 )
 
@@ -21,8 +22,9 @@ type Server struct {
 	Host string
 	Port string
 
-	Nodes  []GossipNode
-	Logger Logger
+	MessagesSeen map[string]struct{}
+	Nodes        []*GossipNode
+	Logger       Logger
 
 	WorkersPerListener int
 	WorkersPerHandler  int
@@ -30,9 +32,8 @@ type Server struct {
 	signals   chan os.Signal
 	terminate chan struct{}
 
-	handlers    []RequestHandler
-	rawHandlers []RawRequestHandler
-	schedulers  map[time.Duration]HandlerFunc
+	handlers   []RequestHandler
+	schedulers map[time.Duration]HandlerFunc
 
 	// The protobuf enveloped message
 	incomingMessage chan envelope.Envelope
@@ -42,6 +43,8 @@ type Server struct {
 func NewServer(
 	name string,
 	description string,
+	host string,
+	port string,
 	logger Logger,
 ) (*Server, error) {
 
@@ -56,6 +59,8 @@ func NewServer(
 		Description: description,
 		Nodes:       bootstrapNodes,
 		Logger:      logger,
+		Host:        host,
+		Port:        port,
 
 		terminate: make(chan struct{}, 1),
 	}
@@ -90,7 +95,6 @@ func (s *Server) setupSignals() {
 // channel will receive upon termination of the server which can come
 // from a number of different sources.
 func (s *Server) Start() <-chan struct{} {
-
 	// Commence all handlers
 	s.startRequestHandlers()
 
@@ -98,6 +102,8 @@ func (s *Server) Start() <-chan struct{} {
 	// @TODO(mark)
 
 	s.startNetworkListener()
+
+	s.subscribeToNodes()
 
 	return s.listenForTermination()
 }
@@ -137,16 +143,6 @@ func (s *Server) startConnectionHandler(conn net.Conn) {
 		return
 	}
 
-	// Forward gossip to other nodes we're connected to
-	for _, node := range s.Nodes {
-		err := node.SendMessage(b)
-		if err != nil {
-			// @TODO(mark): Mark a failure at node
-			s.Logger.Errorf("[Forward Gossip] Unable to contact node %+v: %s", node, err.Error())
-			return
-		}
-	}
-
 	// Convert and downstream
 	envelope := envelope.Envelope{}
 	err = proto.Unmarshal(b, &envelope)
@@ -161,25 +157,25 @@ func (s *Server) startConnectionHandler(conn net.Conn) {
 
 // When a message comes in, we forward that message to all handlers as
 // many might want to deal with it
-func (s *Server) forwardHandlers(message envelope.Envelope) {
-
-	// Send to the raw handlers first
-	for _, rawHandler := range s.rawHandlers {
-		err := rawHandler.HandlerFunc(s, message.EncodedMessage)
-		if err != nil {
-			s.Logger.Errorf("[Handler] Error processing raw request: %s", err.Error())
-		}
-	}
-
+func (s *Server) forwardHandlers(message *envelope.Envelope) {
 	// Send to the handlers which require it to be unmarshaled
 	for _, handler := range s.handlers {
 		if handler.IsMatch(message.GetHeaders().Key) {
-			unmarshalType := handler.UnmarshalType
-			err := proto.Unmarshal(message.EncodedMessage, unmarshalType)
-			if err != nil {
-				s.Logger.Errorf("[Handler] Error unmarshaling request: %s", err.Error())
+			// The message to forward to the respective handler
+			var unmarshaledPb proto.Message
+
+			if unmarshaledPb == nil {
+				// Send the raw enveloped message
+				unmarshaledPb = message
+			} else {
+				// Handle unmarshal here
+				unmarshaledPb = handler.UnmarshalType
+				err := proto.Unmarshal(message.EncodedMessage, unmarshaledPb)
+				if err != nil {
+					s.Logger.Errorf("[Handler] Error unmarshaling request: %s", err.Error())
+				}
 			}
-			err = handler.HandlerFunc(s, unmarshalType)
+			err := handler.HandlerFunc(s, unmarshaledPb)
 			if err != nil {
 				s.Logger.Errorf("[Handler] Error processing request: %s", err.Error())
 			}
@@ -197,7 +193,7 @@ func (s *Server) startRequestHandlers() {
 				case <-s.terminate:
 					return
 				case message := <-s.incomingMessage:
-					s.forwardHandlers(message)
+					s.forwardHandlers(&message)
 				}
 			}
 		}()
@@ -224,4 +220,119 @@ func (s *Server) listenForTermination() <-chan struct{} {
 // Triggers a termination to send to the server which will cleanly shut down
 func (s *Server) Terminate() {
 	close(s.terminate)
+}
+
+// Spreads the raw bytes of a gossip, this needs to be an envelope to
+// avoid breaking everything. Therefore considered unsafe to be public.
+func (s *Server) spreadGossipRaw(b []byte) {
+	// Select a sample
+	// @TODO(mark): This should select a random distribution of nodes,
+	//              not all nodes
+	sample := s.Nodes
+
+	// Loop nodes and send to all
+	for _, node := range sample {
+		err := node.Connect()
+		if err != nil {
+			s.Logger.Errorf("Unable to connect to node: %s", err)
+		}
+
+		err = node.SendMessage(b)
+		if err != nil {
+			s.Logger.Errorf("Unable to send to node: %s", err)
+		}
+	}
+}
+
+// Broadcasts a subscription notice to all nodes
+func (s *Server) subscribeToNodes() {
+	// No one to subscribe to if there are no nodes available
+	if len(s.Nodes) == 0 {
+		return
+	}
+
+	subscription := &subscribe.Subscribe{
+		Name:        s.Name,
+		Description: s.Description,
+		Host:        s.Host,
+		Port:        s.Port,
+	}
+
+	// And send!
+	s.Broadcast(
+		"node.subscribe",
+		subscription,
+		int32(envelope.Envelope_ASYNC_REQUEST),
+	)
+}
+
+// Public gossip sender
+//
+// The message type should be:
+//  0 -> Async request
+//  1 -> Sync request (will return a receipt)
+//  3 -> Response (someone should be listening for the receipt)
+//
+// Will marshal to bytes, place inside an envelope which will then also be
+// marshaled into bytes.
+func (s *Server) Broadcast(
+	key string,
+	message proto.Message,
+	messageType int32,
+) (string, error) {
+
+	// Check if the message type exists
+	_, ok := envelope.Envelope_Type_name[messageType]
+	if !ok {
+		return "", fmt.Errorf("message type %d does not exist", messageType)
+	}
+
+	envelopeType := envelope.Envelope_Type(messageType)
+
+	// Marshal the message
+	b, err := proto.Marshal(message)
+	if err != nil {
+		return "", fmt.Errorf("unable to marshal proto: %s", err)
+	}
+
+	// Generate a UID and, if necessary, a receipt
+	uid := s.genUid(key)
+	receipt := ""
+	if envelopeType == envelope.Envelope_SYNC_REQUEST {
+		receipt = s.genReceipt(uid)
+	}
+
+	// Put the envelope together and send
+	envelope := &envelope.Envelope{
+		Uid:  uid,
+		Type: envelopeType,
+		Headers: &envelope.Envelope_Header{
+			Key:     key,
+			Receipt: receipt,
+		},
+		PassedThrough:  0,
+		EncodedMessage: b,
+	}
+
+	b, err = proto.Marshal(envelope)
+	if err != nil {
+		return "", fmt.Errorf("unable to marshal envelope proto: %s", err)
+	}
+
+	s.spreadGossipRaw(b)
+
+	return receipt, nil
+}
+
+// Generates a unique ID based on the server name, request key and nanosecond
+// timestamp. Doesn't guarantee absolute uniqueness but it's close for testing
+// purposes
+func (s *Server) genUid(key string) string {
+	return fmt.Sprintf("%s-%s-%d", s.Name, key, time.Now().UnixNano())
+}
+
+// Generates a receipt. This will just append to the unique ID to make it
+// simpler
+func (s *Server) genReceipt(key string) string {
+	return fmt.Sprintf("%s--receipt", key)
 }

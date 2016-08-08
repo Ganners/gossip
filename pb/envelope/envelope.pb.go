@@ -23,17 +23,20 @@ var _ = proto.Marshal
 type Envelope_Type int32
 
 const (
-	Envelope_REQUEST  Envelope_Type = 0
-	Envelope_RESPONSE Envelope_Type = 1
+	Envelope_ASYNC_REQUEST Envelope_Type = 0
+	Envelope_SYNC_REQUEST  Envelope_Type = 1
+	Envelope_RESPONSE      Envelope_Type = 2
 )
 
 var Envelope_Type_name = map[int32]string{
-	0: "REQUEST",
-	1: "RESPONSE",
+	0: "ASYNC_REQUEST",
+	1: "SYNC_REQUEST",
+	2: "RESPONSE",
 }
 var Envelope_Type_value = map[string]int32{
-	"REQUEST":  0,
-	"RESPONSE": 1,
+	"ASYNC_REQUEST": 0,
+	"SYNC_REQUEST":  1,
+	"RESPONSE":      2,
 }
 
 func (x Envelope_Type) String() string {
@@ -43,10 +46,14 @@ func (x Envelope_Type) String() string {
 // An envelope is our internal type which will wrap the protobuf object.
 // It contains common fields which will be used by the framework.
 type Envelope struct {
-	Type    Envelope_Type    `protobuf:"varint,1,opt,name=type,enum=Envelope_Type" json:"type,omitempty"`
-	Headers *Envelope_Header `protobuf:"bytes,2,opt,name=headers" json:"headers,omitempty"`
+	Uid     string           `protobuf:"bytes,1,opt,name=uid" json:"uid,omitempty"`
+	Type    Envelope_Type    `protobuf:"varint,2,opt,name=type,enum=Envelope_Type" json:"type,omitempty"`
+	Headers *Envelope_Header `protobuf:"bytes,3,opt,name=headers" json:"headers,omitempty"`
+	// So we can keep track of i, which is the number of hops since the
+	// originator (I.e. how many nodes it has passed through)
+	PassedThrough int32 `protobuf:"varint,4,opt,name=passedThrough" json:"passedThrough,omitempty"`
 	// The encodedMessage contains the embedded proto bytes
-	EncodedMessage []byte `protobuf:"bytes,3,opt,name=encodedMessage,proto3" json:"encodedMessage,omitempty"`
+	EncodedMessage []byte `protobuf:"bytes,5,opt,name=encodedMessage,proto3" json:"encodedMessage,omitempty"`
 }
 
 func (m *Envelope) Reset()         { *m = Envelope{} }

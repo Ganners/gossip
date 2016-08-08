@@ -9,13 +9,13 @@ func TestGossipNodesFromFlag(t *testing.T) {
 
 	testCases := []struct {
 		input       string
-		outputNodes []GossipNode
+		outputNodes []*GossipNode
 		outputError error
 	}{
 		{
 			input:       "192.168.0.1:3030",
 			outputError: nil,
-			outputNodes: []GossipNode{
+			outputNodes: []*GossipNode{
 				{
 					Host: "192.168.0.1",
 					Port: "3030",
@@ -25,7 +25,7 @@ func TestGossipNodesFromFlag(t *testing.T) {
 		{
 			input:       "  192.168.0.1:3030  ",
 			outputError: nil,
-			outputNodes: []GossipNode{
+			outputNodes: []*GossipNode{
 				{
 					Host: "192.168.0.1",
 					Port: "3030",
@@ -35,7 +35,7 @@ func TestGossipNodesFromFlag(t *testing.T) {
 		{
 			input:       "192.168.0.1:3030,test.com:12345",
 			outputError: nil,
-			outputNodes: []GossipNode{
+			outputNodes: []*GossipNode{
 				{
 					Host: "192.168.0.1",
 					Port: "3030",
@@ -49,7 +49,7 @@ func TestGossipNodesFromFlag(t *testing.T) {
 		{
 			input:       "192.168.0.1:3030, test.com:12345 ,",
 			outputError: nil,
-			outputNodes: []GossipNode{
+			outputNodes: []*GossipNode{
 				{
 					Host: "192.168.0.1",
 					Port: "3030",

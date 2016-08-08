@@ -13,13 +13,14 @@ import (
 // can trigger another message to a receipt if it wants
 type RequestHandlerFunc func(server *Server, request proto.Message) error
 
-// Similar with the above, except it will deal with the bytes received rather
-// than the step prior which marshals into a protobuf
-type RawRequestHandlerFunc func(server *Server, b []byte) error
-
 // A handler doesn't take a request, it will be used to do scheduled
 // things
 type HandlerFunc func(server *Server) error
+
+// Embeddable type which allows a key to be matched
+type RequestMatcher struct {
+	Matcher string
+}
 
 // The request handler wrapper, allows us to understand the key we're
 // hunting for and also specify the type so we know how to unmarshal
@@ -28,18 +29,6 @@ type RequestHandler struct {
 	RequestMatcher
 	UnmarshalType proto.Message
 	HandlerFunc   RequestHandlerFunc
-}
-
-// Similar with the RequestHandler but deals with raw bytes from a
-// request
-type RawRequestHandler struct {
-	RequestMatcher
-	HandlerFunc RawRequestHandlerFunc
-}
-
-// Embeddable type which allows a key to be matched
-type RequestMatcher struct {
-	Matcher string
 }
 
 // IsMatch will test whether the key matches another given key which is
