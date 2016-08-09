@@ -13,6 +13,10 @@ import (
 	"github.com/gogo/protobuf/proto"
 )
 
+const (
+	MessageMemory = time.Second * 30
+)
+
 // Server is the root structure for a gossip node
 type Server struct {
 	Name        string
@@ -21,12 +25,10 @@ type Server struct {
 	Host string
 	Port string
 
-	MessagesSeen map[string]struct{}
-	Nodes        []*GossipNode
-	Logger       Logger
+	Nodes  []*GossipNode
+	Logger Logger
 
-	WorkersPerListener int
-	WorkersPerHandler  int
+	workersPerHandler int
 
 	signals   chan os.Signal
 	terminate chan struct{}
@@ -36,6 +38,7 @@ type Server struct {
 
 	// The protobuf enveloped message
 	incomingMessage chan *envelope.Envelope
+	messagesSeen    map[string]struct{}
 }
 
 // NewServer creates a new idle server ready to be started
@@ -63,9 +66,9 @@ func NewServer(
 		handlers:    defaultHandlers,
 
 		// @TODO(mark): Make flag/config based or modifable
-		WorkersPerListener: 5,
-		WorkersPerHandler:  5,
+		workersPerHandler: 5,
 
+		messagesSeen:    make(map[string]struct{}, 1000),
 		terminate:       make(chan struct{}, 1),
 		incomingMessage: make(chan *envelope.Envelope, 5),
 	}
@@ -149,7 +152,7 @@ func (s *Server) startNetworkListener() {
 // Starts a connection handler for a given connection
 func (s *Server) startConnectionHandler(conn net.Conn) {
 	defer conn.Close()
-	request := make([]byte, 1024*2) // 2 MB request is possible!
+	request := make([]byte, 1024*2) // 2 MB is the max request size
 	for {
 		// Read the connection bytes
 		n, err := conn.Read(request)
@@ -195,7 +198,7 @@ func (s *Server) forwardHandlers(message *envelope.Envelope) {
 // Starts a handler for a single request, will be triggered when a
 // server starts, and also when a new request gets added during runtime
 func (s *Server) startRequestHandlers() {
-	for i := 0; i < s.WorkersPerHandler; i++ {
+	for i := 0; i < s.workersPerHandler; i++ {
 		go func() {
 			for {
 				select {
@@ -203,11 +206,34 @@ func (s *Server) startRequestHandlers() {
 					return
 				case message := <-s.incomingMessage:
 					s.Logger.Debugf("Incoming message found: %s", message.Headers.Key)
-					s.forwardHandlers(message)
+					if alreadySeen := s.setMessageSeen(message); !alreadySeen {
+						s.forwardHandlers(message)
+					}
 				}
 			}
 		}()
 	}
+}
+
+// Sets the message as seen, adds a cleanup after a period of time. If the
+// message has already been seen then this will return true, else false.
+func (s *Server) setMessageSeen(envelope *envelope.Envelope) bool {
+	// Return true if we've seen this before
+	if _, seen := s.messagesSeen[envelope.Uid]; seen {
+		return true
+	}
+
+	// Add it to set
+	s.messagesSeen[envelope.Uid] = struct{}{}
+
+	// Start a short lived goroutine which will fire after some seconds and
+	// clean up
+	go func(uid string) {
+		<-time.After(MessageMemory)
+		delete(s.messagesSeen, envelope.Uid)
+	}(envelope.Uid)
+
+	return false
 }
 
 // Listens for termination to return on a shutdown channel to the
@@ -333,17 +359,4 @@ func (s *Server) Broadcast(
 	s.spreadGossipRaw(b)
 
 	return receipt, nil
-}
-
-// Generates a unique ID based on the server name, request key and nanosecond
-// timestamp. Doesn't guarantee absolute uniqueness but it's close for testing
-// purposes
-func (s *Server) genUid(key string) string {
-	return fmt.Sprintf("%s-%s-%d", s.Name, key, time.Now().UnixNano())
-}
-
-// Generates a receipt. This will just append to the unique ID to make it
-// simpler
-func (s *Server) genReceipt(key string) string {
-	return fmt.Sprintf("%s--receipt", key)
 }
