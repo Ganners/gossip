@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+// For our mock login service we'll allow a username, password and
+// optional 'remember me' boolean
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+  bool   rememberMe = 3;
+}
+
+// The response from logging in
+message LoginResponse {
+  string id = 1;
+  string sessionToken = 2;
+  string refreshToken = 3;
+}
