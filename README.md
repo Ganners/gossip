@@ -1,0 +1,21 @@
+Gossip Microservice Framework
+=============================
+
+This is a proof of concept for a purely gossip based microservice framework
+built in Go. It is missing a lot of pieces and optimisations but it roughly
+achieves what it sets out to do.
+
+This reduces the need for shared infrastructure to handle reliable
+communication, a microservice built around gossiping is therefore purely
+`reactive` and very resilient to failure.
+
+There are a large number of fairly important TODO statements in this, for the
+purpose of the Yoti test this is set out to solve this doesn't need to be 100%
+complete. The underlying architecture and API can be criticised heavily before
+proceeding with the finer implementation details.
+
+There are various potential implementations for particular parts which would be
+good to compose in and benchmark in future. The literature on this is fairly
+ubiquitous although it hasn't gained much ground as the core microservice
+transport protocol The literature on this is fairly ubiquitous although it
+hasn't gained much ground as the core microservice transport protocol.
