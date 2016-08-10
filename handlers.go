@@ -22,11 +22,11 @@ var defaultHandlers = []RequestHandler{
 			server.Logger.Debugf("Adding node: %+v", subscription)
 
 			// Add to nodes
-			server.Nodes = append(server.Nodes, &GossipNode{
+			server.nodes[subscription.Host+subscription.Port] = &GossipNode{
 				Name: subscription.Name,
 				Host: subscription.Host,
 				Port: subscription.Port,
-			})
+			}
 
 			// Else forward to nodes
 			return nil

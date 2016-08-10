@@ -25,7 +25,7 @@ type Server struct {
 	Host string
 	Port string
 
-	Nodes  []*GossipNode
+	nodes  map[string]*GossipNode
 	Logger Logger
 
 	workersPerHandler int
@@ -59,7 +59,6 @@ func NewServer(
 	server := &Server{
 		Name:        name,
 		Description: description,
-		Nodes:       bootstrapNodes,
 		Logger:      logger,
 		Host:        host,
 		Port:        port,
@@ -68,6 +67,7 @@ func NewServer(
 		// @TODO(mark): Make flag/config based or modifable
 		workersPerHandler: 5,
 
+		nodes:           bootstrapNodes,
 		messagesSeen:    make(map[string]struct{}, 1000),
 		terminate:       make(chan struct{}, 1),
 		incomingMessage: make(chan *envelope.Envelope, 5),
@@ -264,7 +264,7 @@ func (s *Server) spreadGossipRaw(b []byte) {
 	// Select a sample
 	// @TODO(mark): This should select a random distribution of nodes,
 	//              not all nodes
-	sample := s.Nodes
+	sample := s.nodes
 
 	// Loop nodes and send to all
 	for _, node := range sample {
@@ -285,7 +285,7 @@ func (s *Server) spreadGossipRaw(b []byte) {
 // Broadcasts a subscription notice to all nodes
 func (s *Server) subscribeToNodes() {
 	// No one to subscribe to if there are no nodes available
-	if len(s.Nodes) == 0 {
+	if len(s.nodes) == 0 {
 		return
 	}
 
