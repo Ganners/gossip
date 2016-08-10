@@ -1,6 +1,7 @@
 package gossip
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -359,4 +360,20 @@ func (s *Server) Broadcast(
 	s.spreadGossipRaw(b)
 
 	return receipt, nil
+}
+
+// Adds a node to the list of gossip nodes, can be used externally to
+// add a node programatically
+func (s *Server) AddNode(node *GossipNode) error {
+	if len(node.Host) == 0 {
+		return errors.New("No host specified on node")
+	}
+	if len(node.Port) == 0 {
+		return errors.New("No port specified on node")
+	}
+	if node.Host == s.Host && node.Port == s.Port {
+		return errors.New("Can not add self as node")
+	}
+	s.nodes[node.Host+node.Port] = node
+	return nil
 }

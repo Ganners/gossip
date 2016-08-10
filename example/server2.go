@@ -14,7 +14,7 @@ func main() {
 	)
 
 	// Add node manually
-	server.Nodes = append(server.Nodes, &gossip.GossipNode{
+	server.AddNode(&gossip.GossipNode{
 		Host: "0.0.0.0",
 		Port: "8001",
 	})

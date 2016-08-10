@@ -20,11 +20,13 @@ var defaultHandlers = []RequestHandler{
 			}
 
 			// Add to nodes
-			server.nodes[subscription.Host+subscription.Port] = &GossipNode{
+			server.AddNode(&GossipNode{
 				Name: subscription.Name,
 				Host: subscription.Host,
 				Port: subscription.Port,
-			}
+			})
+
+			server.Logger.Debugf("Node added/updated, current state: %s", server.nodes)
 
 			// Else forward to nodes
 			return nil
@@ -36,7 +38,7 @@ var defaultHandlers = []RequestHandler{
 		HandlerFunc: func(server *Server, request envelope.Envelope) error {
 
 			envelope := request
-			server.Logger.Debugf("Forwarding gossip: %+v", envelope)
+			server.Logger.Debugf("Forwarding gossip")
 
 			// Increment passthrough and resend
 			envelope.PassedThrough++
