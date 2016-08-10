@@ -19,3 +19,14 @@ good to compose in and benchmark in future. The literature on this is fairly
 ubiquitous although it hasn't gained much ground as the core microservice
 transport protocol The literature on this is fairly ubiquitous although it
 hasn't gained much ground as the core microservice transport protocol.
+
+For testing I've built a couple of programs in the example folder. To start
+simply launch them in order in a couple of terminals.
+
+> go run example/server1.go
+
+> go run example/server2.go
+
+Server 2 makes login requests to server 1, server 1 writes responses to these.
+Both servers maintain a view of their world (excluding themselves). I've made
+the node list pretty print so it can be easily visualised.
