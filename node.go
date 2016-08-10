@@ -47,7 +47,7 @@ func (n GossipNodes) ToSortedList() []*GossipNode {
 // Prints out the list of nodes as a table, pretty!
 func (n GossipNodes) String() string {
 
-	str := ""
+	str := "\n"
 
 	headerName := "Service Name"
 	headerHost := "Host"
@@ -138,16 +138,16 @@ func (n *GossipNode) Connect() error {
 
 // This will populate the bootstrap (start up) nodes, a node will need to be
 // told about at least one connection to start gossiping
-func bootstrapGossipNodes() (map[string]*GossipNode, error) {
+func bootstrapGossipNodes() (GossipNodes, error) {
 	nodesStr := flag.String("bootstrap-nodes", "", "Comma separated list of nodes")
 	return gossipNodesFromFlag(*nodesStr)
 }
 
 // This will perform the string operations to convert the input flag into a
 // series of nodes.
-func gossipNodesFromFlag(str string) (map[string]*GossipNode, error) {
+func gossipNodesFromFlag(str string) (GossipNodes, error) {
 
-	nodes := make(map[string]*GossipNode, 10)
+	nodes := make(GossipNodes, 10)
 	nodeStrings := strings.Split(str, ",")
 
 	if len(nodeStrings) == 0 {

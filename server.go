@@ -25,7 +25,7 @@ type Server struct {
 	Host string
 	Port string
 
-	nodes  map[string]*GossipNode
+	nodes  GossipNodes
 	Logger Logger
 
 	workersPerHandler int

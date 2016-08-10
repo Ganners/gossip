@@ -19,8 +19,6 @@ var defaultHandlers = []RequestHandler{
 				return fmt.Errorf("could not convert message to subscribe.Subscribe: %s", err)
 			}
 
-			server.Logger.Debugf("Adding node: %+v", subscription)
-
 			// Add to nodes
 			server.nodes[subscription.Host+subscription.Port] = &GossipNode{
 				Name: subscription.Name,

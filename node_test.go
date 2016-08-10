@@ -10,13 +10,13 @@ func TestGossipNodesFromFlag(t *testing.T) {
 
 	testCases := []struct {
 		input       string
-		outputNodes map[string]*GossipNode
+		outputNodes GossipNodes
 		outputError error
 	}{
 		{
 			input:       "192.168.0.1:3030",
 			outputError: nil,
-			outputNodes: map[string]*GossipNode{
+			outputNodes: GossipNodes{
 				"192.168.0.13030": {
 					Host: "192.168.0.1",
 					Port: "3030",
@@ -26,7 +26,7 @@ func TestGossipNodesFromFlag(t *testing.T) {
 		{
 			input:       "  192.168.0.1:3030  ",
 			outputError: nil,
-			outputNodes: map[string]*GossipNode{
+			outputNodes: GossipNodes{
 				"192.168.0.13030": {
 					Host: "192.168.0.1",
 					Port: "3030",
@@ -36,7 +36,7 @@ func TestGossipNodesFromFlag(t *testing.T) {
 		{
 			input:       "192.168.0.1:3030,test.com:12345",
 			outputError: nil,
-			outputNodes: map[string]*GossipNode{
+			outputNodes: GossipNodes{
 				"192.168.0.13030": {
 					Host: "192.168.0.1",
 					Port: "3030",
@@ -50,7 +50,7 @@ func TestGossipNodesFromFlag(t *testing.T) {
 		{
 			input:       "192.168.0.1:3030, test.com:12345 ,",
 			outputError: nil,
-			outputNodes: map[string]*GossipNode{
+			outputNodes: GossipNodes{
 				"192.168.0.13030": {
 					Host: "192.168.0.1",
 					Port: "3030",
@@ -99,6 +99,7 @@ func TestGossipNodesString(t *testing.T) {
 	}
 
 	expected := strings.Join([]string{
+		"",
 		"+---------------------+--------------+-------+",
 		"| Service Name        | Host         | Port  |",
 		"+---------------------+--------------+-------+",
@@ -106,7 +107,8 @@ func TestGossipNodesString(t *testing.T) {
 		"| Some Service 1      | 192.168.0.1  | 0002  |",
 		"| Some Other Service  | 192.168.0.1  | 0003  |",
 		"| Login Service       | 192.168.0.1  | 0004  |",
-		"+---------------------+--------------+-------+\n",
+		"+---------------------+--------------+-------+",
+		"",
 	}, "\n")
 
 	str := gossipNodes.String()
