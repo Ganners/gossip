@@ -15,6 +15,8 @@ var (
 	NodeDescriptionIncomplete = errors.New("Node Description is Incomplete")
 )
 
+// Sortable form for the gossip nodes, by host and port rather than
+// name
 type GossipNodesOrdered []*GossipNode
 
 // Make GossipNodesOrdered sortable
