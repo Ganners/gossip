@@ -17,7 +17,7 @@ import (
 
 const (
 	MessageMemory   = time.Second * 30
-	ResponseTimeout = time.Second * 2
+	ResponseTimeout = time.Second * 5
 )
 
 // Server is the root structure for a gossip node
@@ -28,13 +28,15 @@ type Server struct {
 	Host string
 	Port string
 
-	nodes  GossipNodes
 	Logger Logger
 
 	workersPerHandler int
 
 	signals   chan os.Signal
 	terminate chan struct{}
+
+	nodesLock sync.RWMutex
+	nodes     GossipNodes
 
 	// Handlers are stored in a set, we need to be able to quickly add/remove
 	// from it
@@ -177,8 +179,6 @@ func (s *Server) startConnectionHandler(conn net.Conn) {
 			return
 		}
 
-		s.Logger.Debugf("Reading # bytes %d", len(b))
-
 		// Convert and downstream
 		envelope := &envelope.Envelope{}
 		err = proto.Unmarshal(b, envelope)
@@ -189,7 +189,6 @@ func (s *Server) startConnectionHandler(conn net.Conn) {
 
 		// Send it downstream
 		go func() {
-			s.Logger.Debugf("Sending message downstream")
 			s.incomingMessage <- envelope
 		}()
 	}
@@ -199,14 +198,24 @@ func (s *Server) startConnectionHandler(conn net.Conn) {
 // many might want to deal with it
 func (s *Server) forwardHandlers(message *envelope.Envelope) {
 
+	m := *message
+
 	// Send to the handlers which require it to be unmarshaled
 	s.handlersLock.RLock()
-	defer s.handlersLock.RUnlock()
+	handlersCpy := make(map[*RequestHandler]struct{}, len(s.handlers))
+	for handler, v := range s.handlers {
+		handlersCpy[handler] = v
+	}
+	s.handlersLock.RUnlock()
 
-	for handler, _ := range s.handlers {
-		if handler.IsMatch(message.GetHeaders().Key) {
-			// The message to forward to the respective handler (dereference first)
-			err := handler.HandlerFunc(s, *message)
+	if len(handlersCpy) == 0 {
+		s.Logger.Errorf("No handlers available to handle request, skipping")
+		return
+	}
+
+	for handler, _ := range handlersCpy {
+		if handler.IsMatch(m.GetHeaders().Key) {
+			err := handler.HandlerFunc(s, m)
 			if err != nil {
 				s.Logger.Errorf("[Handler] Error processing request: %s", err.Error())
 			}
@@ -227,6 +236,8 @@ func (s *Server) startRequestHandlers() {
 					if alreadySeen := s.setMessageSeen(message); !alreadySeen {
 						s.Logger.Debugf("Incoming message found: %s", message.Headers.Key)
 						s.forwardHandlers(message)
+					} else {
+						s.Logger.Debugf("Message already seen, skipping: %s (%s)", message.Headers.Key, message.Uid)
 					}
 				}
 			}
@@ -292,30 +303,36 @@ func (s *Server) spreadGossipRaw(b []byte) {
 	// Select a sample
 	// @TODO(mark): This should select a random distribution of nodes,
 	//              not all nodes
-	sample := s.nodes
+	s.nodesLock.RLock()
+	sample := s.nodes.ToSortedList()
+	s.nodesLock.RUnlock()
 
 	// Loop nodes and send to all
 	for _, node := range sample {
-		err := node.Connect()
-		if err != nil {
-			s.Logger.Errorf("Unable to connect to node: %s", err)
-		}
+		go func(node *GossipNode) {
+			err := node.Connect()
+			if err != nil {
+				s.Logger.Errorf("Unable to connect to node: %s", err)
+			}
 
-		s.Logger.Debugf("Broadcasting # bytes: %d", len(b))
+			err = node.SendMessage(b)
+			if err != nil {
+				s.Logger.Errorf("Unable to send to node: %s", err)
 
-		err = node.SendMessage(b)
-		if err != nil {
-			s.Logger.Errorf("Unable to send to node: %s", err)
-
-			// @TODO(mark): Need some strategy to allow for X retries before
-			// declaring a node dead and gossiping about the death of the node
-		}
+				// @TODO(mark): Need some strategy to allow for X retries before
+				// declaring a node dead and gossiping about the death of the node
+			}
+		}(node)
 	}
 }
 
 // Broadcasts a subscription notice to all nodes
 func (s *Server) subscribeToNodes() {
+
 	// No one to subscribe to if there are no nodes available
+	s.nodesLock.RLock()
+	defer s.nodesLock.RUnlock()
+
 	if len(s.nodes) == 0 {
 		return
 	}
@@ -347,6 +364,9 @@ func (s *Server) BroadcastAndWaitForResponse(
 	uid := s.genUid(key)
 	receipt := s.genReceipt(uid)
 	response, timeout := s.AddResponseHandler(receipt)
+
+	// @TODO(mark): Remove this
+	time.Sleep(time.Millisecond * 500)
 
 	err := s.broadcast(key, uid, receipt, message, int32(envelope.Envelope_SYNC_REQUEST))
 	if err != nil {
@@ -416,6 +436,12 @@ func (s *Server) broadcast(
 		return fmt.Errorf("unable to marshal envelope proto: %s", err)
 	}
 
+	// Make sure we don't receive our own message
+	s.messagesLock.Lock()
+	s.messagesSeen[uid] = struct{}{}
+	s.messagesLock.Unlock()
+
+	s.Logger.Debugf("Spreading gossip for uid: %s", uid)
 	s.spreadGossipRaw(b)
 
 	return nil
@@ -424,6 +450,10 @@ func (s *Server) broadcast(
 // Adds a node to the list of gossip nodes, can be used externally to
 // add a node programatically
 func (s *Server) AddNode(node *GossipNode) error {
+
+	s.nodesLock.Lock()
+	defer s.nodesLock.Unlock()
+
 	if len(node.Host) == 0 {
 		return errors.New("No host specified on node")
 	}
@@ -433,18 +463,20 @@ func (s *Server) AddNode(node *GossipNode) error {
 	if node.Host == s.Host && node.Port == s.Port {
 		return errors.New("Can not add self as node")
 	}
+
 	s.nodes[node.Host+node.Port] = node
+
 	return nil
 }
 
 // Adds a new handler to the server for a given filter
 func (s *Server) Handle(filter string, handler RequestHandlerFunc) {
 	s.handlersLock.Lock()
+	defer s.handlersLock.Unlock()
 	s.handlers[&RequestHandler{
 		RequestMatcher: RequestMatcher{filter},
 		HandlerFunc:    handler,
 	}] = struct{}{}
-	s.handlersLock.Unlock()
 }
 
 // Adds a handler which will live for a short time
@@ -453,33 +485,34 @@ func (s *Server) AddResponseHandler(
 ) (<-chan envelope.Envelope, <-chan struct{}) {
 
 	// Where the response will be returned (or timeout)
+	timeout := time.NewTimer(ResponseTimeout)
+
 	responseChan := make(chan envelope.Envelope, 1)
 	timeoutChan := make(chan struct{}, 1)
+	deleteChan := make(chan struct{}, 1)
+
+	reqHandler := &RequestHandler{
+		RequestMatcher: RequestMatcher{receipt}, // Listen for the receipt
+		HandlerFunc: func(server *Server, envelope envelope.Envelope) error {
+			responseChan <- envelope
+			timeout.Stop()
+			deleteChan <- struct{}{}
+			return nil
+		},
+	}
+
+	s.handlersLock.Lock()
+	s.handlers[reqHandler] = struct{}{} // Add the handler
+	s.handlersLock.Unlock()
 
 	go func() {
-		reqResponse := make(chan envelope.Envelope, 1)
-
-		reqHandler := &RequestHandler{
-			RequestMatcher: RequestMatcher{receipt}, // Listen for the receipt
-			HandlerFunc: func(server *Server, envelope envelope.Envelope) error {
-				reqResponse <- envelope // Send the envelope back
-				return nil
-			},
-		}
-
-		s.handlersLock.Lock()
-		s.handlers[reqHandler] = struct{}{} // Add the handler
-		s.handlersLock.Unlock()
-
 		// Listen for response (and forward on), or timeout
 		select {
-		case response := <-reqResponse:
-			responseChan <- response
-		case <-time.After(ResponseTimeout):
+		case <-timeout.C:
 			timeoutChan <- struct{}{}
+		case <-deleteChan:
 		}
 
-		// Remove the handler, no longer need it around!
 		s.handlersLock.Lock()
 		delete(s.handlers, reqHandler)
 		s.handlersLock.Unlock()

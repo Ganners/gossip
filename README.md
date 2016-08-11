@@ -17,8 +17,7 @@ proceeding with the finer implementation details.
 There are various potential implementations for particular parts which would be
 good to compose in and benchmark in future. The literature on this is fairly
 ubiquitous although it hasn't gained much ground as the core microservice
-transport protocol The literature on this is fairly ubiquitous although it
-hasn't gained much ground as the core microservice transport protocol.
+transport protocol.
 
 For testing I've built a couple of programs in the example folder. To start
 simply launch them in order in a couple of terminals.

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 var (
@@ -58,6 +59,7 @@ func (n GossipNodes) String() string {
 	maxPort := len(headerPort)
 
 	for _, node := range n {
+		node.Lock()
 		if len(node.Name) > maxName {
 			maxName = len(node.Name)
 		}
@@ -67,6 +69,7 @@ func (n GossipNodes) String() string {
 		if len(node.Port) > maxPort {
 			maxPort = len(node.Port)
 		}
+		node.Unlock()
 	}
 
 	maxNameStr := strconv.Itoa(maxName + 2)
@@ -86,10 +89,12 @@ func (n GossipNodes) String() string {
 	str += line
 
 	for _, node := range n.ToSortedList() {
+		node.Lock()
 		row := "| " + fmt.Sprintf("%-"+maxNameStr+"s", node.Name)
 		row += "| " + fmt.Sprintf("%-"+maxHostStr+"s", node.Host)
 		row += "| " + fmt.Sprintf("%-"+maxPortStr+"s", node.Port) + "|\n"
 		str += row
+		node.Unlock()
 	}
 
 	str += line
@@ -101,14 +106,20 @@ func (n GossipNodes) String() string {
 // connection with
 type GossipNode struct {
 	Name string
-	Conn net.Conn
 	Host string
 	Port string
+
+	sync.Mutex
+	Conn net.Conn
 }
 
 // Sends a message to a node, can be used to send a request or forward
 // gossip
 func (n *GossipNode) SendMessage(b []byte) error {
+
+	n.Lock()
+	defer n.Unlock()
+
 	if n.Conn == nil {
 		return errors.New("gossip node has not established a connection")
 	}
@@ -120,6 +131,10 @@ func (n *GossipNode) SendMessage(b []byte) error {
 // @TODO(mark): This will start a TCP connection to each node, it isn't
 //              particularly scalable but simplifies the initial implementation
 func (n *GossipNode) Connect() error {
+
+	n.Lock()
+	defer n.Unlock()
+
 	// If it's already connected then return nil
 	if n.Conn != nil {
 		return nil

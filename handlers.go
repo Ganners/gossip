@@ -12,6 +12,9 @@ var defaultHandlers = []RequestHandler{
 	{
 		RequestMatcher: RequestMatcher{"node.subscribe"},
 		HandlerFunc: func(server *Server, request envelope.Envelope) error {
+
+			server.Logger.Debugf("Updating node list")
+
 			// Unmarshal and forward on
 			subscription := &subscribe.Subscribe{}
 			err := proto.Unmarshal(request.EncodedMessage, subscription)
@@ -26,7 +29,12 @@ var defaultHandlers = []RequestHandler{
 				Port: subscription.Port,
 			})
 
+			// Pass back myself?
+			//>> server.subscribeToNodes()
+
+			server.nodesLock.RLock()
 			server.Logger.Debugf("Node added/updated, current state: %s", server.nodes)
+			server.nodesLock.RUnlock()
 
 			// Else forward to nodes
 			return nil
