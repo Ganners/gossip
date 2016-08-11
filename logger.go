@@ -11,6 +11,23 @@ type Logger interface {
 	Fatalf(format string, v ...interface{})
 }
 
+// If we want no noise, don't care about it even logging to file then
+// we can use this
+type SilentLogger struct{}
+
+func NewSilentLogger() *SilentLogger {
+	return &SilentLogger{}
+}
+
+func (SilentLogger) Debugf(format string, v ...interface{}) {
+}
+
+func (SilentLogger) Errorf(format string, v ...interface{}) {
+}
+
+func (SilentLogger) Fatalf(format string, v ...interface{}) {
+}
+
 // the StdoutLogger simply leverages go's log.Println
 type StdoutLogger struct{}
 

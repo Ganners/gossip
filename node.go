@@ -140,6 +140,7 @@ func (n *GossipNode) Connect() error {
 // told about at least one connection to start gossiping
 func bootstrapGossipNodes() (GossipNodes, error) {
 	nodesStr := flag.String("bootstrap-nodes", "", "Comma separated list of nodes")
+	flag.Parse() // @TODO(mark): This needs to be moved, likely it'll be called for lots of things!
 	return gossipNodesFromFlag(*nodesStr)
 }
 

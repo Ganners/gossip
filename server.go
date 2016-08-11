@@ -17,7 +17,7 @@ import (
 
 const (
 	MessageMemory   = time.Second * 30
-	ResponseTimeout = time.Second * 30
+	ResponseTimeout = time.Second * 2
 )
 
 // Server is the root structure for a gossip node
@@ -342,12 +342,31 @@ func (s *Server) BroadcastAndWaitForResponse(
 	key string,
 	message proto.Message,
 ) (error, <-chan envelope.Envelope, <-chan struct{}) {
-	receipt, err := s.Broadcast(key, message, int32(envelope.Envelope_SYNC_REQUEST))
+
+	// Generate a UID and, if necessary, a receipt
+	uid := s.genUid(key)
+	receipt := s.genReceipt(uid)
+	response, timeout := s.AddResponseHandler(receipt)
+
+	err := s.broadcast(key, uid, receipt, message, int32(envelope.Envelope_SYNC_REQUEST))
 	if err != nil {
 		return err, nil, nil
 	}
-	response, timeout := s.AddResponseHandler(receipt)
+
 	return nil, response, timeout
+}
+
+// The public version
+func (s *Server) Broadcast(
+	key string,
+	message proto.Message,
+	messageType int32,
+) (string, error) {
+	uid := s.genUid(key)
+
+	// Returning an empty string due to an API change
+	// @TODO(mark): Remove from all usage code
+	return "", s.broadcast(key, uid, "", message, messageType)
 }
 
 // Public gossip sender
@@ -359,15 +378,17 @@ func (s *Server) BroadcastAndWaitForResponse(
 //
 // Will marshal to bytes, place inside an envelope which will then also be
 // marshaled into bytes.
-func (s *Server) Broadcast(
+func (s *Server) broadcast(
 	key string,
+	uid string,
+	receipt string,
 	message proto.Message,
 	messageType int32,
-) (string, error) {
+) error {
 	// Check if the message type exists
 	_, ok := envelope.Envelope_Type_name[messageType]
 	if !ok {
-		return "", fmt.Errorf("message type %d does not exist", messageType)
+		return fmt.Errorf("message type %d does not exist", messageType)
 	}
 
 	envelopeType := envelope.Envelope_Type(messageType)
@@ -375,14 +396,7 @@ func (s *Server) Broadcast(
 	// Marshal the message
 	b, err := proto.Marshal(message)
 	if err != nil {
-		return "", fmt.Errorf("unable to marshal proto: %s", err)
-	}
-
-	// Generate a UID and, if necessary, a receipt
-	uid := s.genUid(key)
-	receipt := ""
-	if envelopeType == envelope.Envelope_SYNC_REQUEST {
-		receipt = s.genReceipt(uid)
+		return fmt.Errorf("unable to marshal proto: %s", err)
 	}
 
 	// Put the envelope together and send
@@ -399,12 +413,12 @@ func (s *Server) Broadcast(
 
 	b, err = proto.Marshal(envelope)
 	if err != nil {
-		return "", fmt.Errorf("unable to marshal envelope proto: %s", err)
+		return fmt.Errorf("unable to marshal envelope proto: %s", err)
 	}
 
 	s.spreadGossipRaw(b)
 
-	return receipt, nil
+	return nil
 }
 
 // Adds a node to the list of gossip nodes, can be used externally to
@@ -462,7 +476,7 @@ func (s *Server) AddResponseHandler(
 		case response := <-reqResponse:
 			responseChan <- response
 		case <-time.After(ResponseTimeout):
-			<-timeoutChan
+			timeoutChan <- struct{}{}
 		}
 
 		// Remove the handler, no longer need it around!
